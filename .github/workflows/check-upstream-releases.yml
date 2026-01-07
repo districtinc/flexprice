@@ -78,17 +78,20 @@ jobs:
             git commit -m "Merge upstream tag $LATEST_VERSION (with conflicts)"
           }
 
-          echo "Preserving fork's .github directory..."
-          # Save the current .github directory from the merge
-          git checkout origin/main -- .github
+          echo "Preserving fork's .github/workflows..."
+          # Remove all workflows from the merge (including upstream workflows)
+          rm -rf .github/workflows/*
+
+          # Copy only the workflows from our main branch
+          git checkout origin/main -- .github/workflows/
 
           # Check if there are any changes to commit
-          if ! git diff --cached --quiet; then
-            git add .github
-            git commit -m "Preserve fork's .github workflows and configurations"
-            echo "✅ Preserved fork's .github directory"
+          if ! git diff --quiet || ! git diff --cached --quiet; then
+            git add .github/workflows
+            git commit -m "Preserve fork's .github workflows (remove upstream workflows)"
+            echo "✅ Preserved fork's .github/workflows directory"
           else
-            echo "ℹ️ No changes needed to .github directory"
+            echo "ℹ️ No changes needed to .github/workflows"
           fi
 
           echo "Pushing branch to origin (force push to overwrite if exists)..."
