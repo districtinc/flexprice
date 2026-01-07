@@ -5,7 +5,12 @@ on:
   pull_request:
     types: [closed]
     branches: [main]
-  workflow_dispatch: # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (e.g., v1.0.58 or latest)'
+        required: false
+        default: 'latest'
 
 permissions:
   contents: read
@@ -13,8 +18,8 @@ permissions:
 
 jobs:
   build:
-    # Only run if PR was merged (not just closed)
-    if: github.event.pull_request.merged == true
+    # Only run if PR was merged (not just closed) OR manually triggered
+    if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
     steps:
@@ -31,20 +36,27 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract version from branch name
+      - name: Extract version
         id: version
         run: |
-          # Try to extract version from PR branch name (e.g., update-to-v1.0.58)
-          BRANCH_NAME="${{ github.event.pull_request.head.ref }}"
-          if [[ "$BRANCH_NAME" =~ update-to-(v[0-9]+\.[0-9]+\.[0-9]+) ]]; then
-            VERSION="${BASH_REMATCH[1]}"
+          # Check if manually triggered with a version input
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
             echo "version=$VERSION" >> $GITHUB_OUTPUT
-            echo "Found version: $VERSION"
+            echo "Using manual version: $VERSION"
           else
-            # Fallback to latest + commit SHA
-            VERSION="latest-${GITHUB_SHA:0:7}"
-            echo "version=$VERSION" >> $GITHUB_OUTPUT
-            echo "Using fallback version: $VERSION"
+            # Try to extract version from PR branch name (e.g., update-to-v1.0.58)
+            BRANCH_NAME="${{ github.event.pull_request.head.ref }}"
+            if [[ "$BRANCH_NAME" =~ update-to-(v[0-9]+\.[0-9]+\.[0-9]+) ]]; then
+              VERSION="${BASH_REMATCH[1]}"
+              echo "version=$VERSION" >> $GITHUB_OUTPUT
+              echo "Found version from PR: $VERSION"
+            else
+              # Fallback to latest + commit SHA
+              VERSION="latest-${GITHUB_SHA:0:7}"
+              echo "version=$VERSION" >> $GITHUB_OUTPUT
+              echo "Using fallback version: $VERSION"
+            fi
           fi
 
       - name: Build and push Docker image
@@ -88,6 +100,10 @@ jobs:
           echo "**Registry:** ghcr.io/districtinc/flexprice" >> $GITHUB_STEP_SUMMARY
           echo "**Platform:** linux/amd64" >> $GITHUB_STEP_SUMMARY
           echo "**Tags:** ${{ steps.version.outputs.version }}, latest" >> $GITHUB_STEP_SUMMARY
-          echo "**PR:** #${{ github.event.pull_request.number }} - ${{ github.event.pull_request.title }}" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "**PR:** #${{ github.event.pull_request.number }} - ${{ github.event.pull_request.title }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Trigger:** Manual workflow dispatch" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "✅ LATEST_TRACKED_VERSION secret updated to ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
