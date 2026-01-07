@@ -1,0 +1,83 @@
+# .github/workflows/build-on-merge.yml
+name: Build Docker Image on PR Merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # Only run if PR was merged (not just closed)
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract version from branch name
+        id: version
+        run: |
+          # Try to extract version from PR branch name (e.g., update-to-v1.0.58)
+          BRANCH_NAME="${{ github.event.pull_request.head.ref }}"
+          if [[ "$BRANCH_NAME" =~ update-to-(v[0-9]+\.[0-9]+\.[0-9]+) ]]; then
+            VERSION="${BASH_REMATCH[1]}"
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "Found version: $VERSION"
+          else
+            # Fallback to latest + commit SHA
+            VERSION="latest-${GITHUB_SHA:0:7}"
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "Using fallback version: $VERSION"
+          fi
+
+      - name: Build Docker image
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          echo "Building Docker image for $VERSION..."
+          docker buildx build \
+            --file Dockerfile.local \
+            --platform linux/amd64 \
+            --tag flexprice:$VERSION \
+            --tag flexprice:latest \
+            --load \
+            .
+
+          # Uncomment below to build for multiple architectures (amd64 and arm64)
+          # Note: Multi-platform builds require pushing to a registry
+          # docker buildx build \
+          #   --file Dockerfile.local \
+          #   --platform linux/amd64,linux/arm64 \
+          #   --tag your-registry/flexprice:$VERSION \
+          #   --tag your-registry/flexprice:latest \
+          #   --push \
+          #   .
+
+          echo "✅ Successfully built Docker image for $VERSION"
+
+      - name: Update tracked version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Updating LATEST_TRACKED_VERSION secret to $VERSION..."
+          echo "$VERSION" | gh secret set LATEST_TRACKED_VERSION
+          echo "✅ Successfully updated LATEST_TRACKED_VERSION to $VERSION"
+
+      - name: Summary
+        run: |
+          echo "### ✅ Docker Image Built" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Platform:** linux/amd64" >> $GITHUB_STEP_SUMMARY
+          echo "**PR:** #${{ github.event.pull_request.number }} - ${{ github.event.pull_request.title }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ LATEST_TRACKED_VERSION secret updated to ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
